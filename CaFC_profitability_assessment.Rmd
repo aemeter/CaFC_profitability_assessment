@@ -1,0 +1,523 @@
+---
+title: "CaFC Profitability Assessment"
+author: "Andrew Meter"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+### Libraries
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(ggthemes)
+library(dplyr)
+library(viridis)
+```
+```
+# Setting parameters for scenarios
+
+## Starmaya - Production costs and yields
+
+```{r message=FALSE, warning=FALSE}
+#Renovation costs
+rC_starmaya=3458
+#Production costs year 1 to 12
+pC_starmaya=c(0,0,1296,1800,2520,1800,1200,1296,1800,2160,1800,1200)
+#Yields (kg/ha)
+y_starmaya=c(0,0,993,1380,1932,1380,0,933,1380,1656,1380,0)
+```
+
+## local_variety - Production costs and yields
+
+```{r message=FALSE, warning=FALSE}
+#Renovation costs
+rC_local_variety=3358
+#Production costs year 1 to 12
+pC_local_variety=c(0,0,1080,1500,2100,1500,1000,1080,1500,1800,1500,1000)
+#Yields (t/ha)
+y_local_variety=c(0,0,828,1150,1610,1150,0,828,1150,1380,1150,0)
+    
+```
+
+## CaFC Credit terms
+```{r message=FALSE, warning=FALSE}
+#Percentage of revenue from years 3/4/5 shared with producer
+R_held=0.5
+#Interest rate of crédit
+#interest_rate_cafc=0.1
+# Start year
+credit_start_cafc=6
+#Number of years
+credit_periods_cafc=5
+# Function to adjust Revenue, Production Costs and Credit Costs 
+cafc_credit<-function(revenue,production_costs,renovation_costs,revenue_held=R_held,interest_rate=interest_rate,start=credit_start_cafc,nbr_periods=credit_periods_cafc){
+    
+    R_cr=revenue
+    R_cr[3]=revenue[3]*revenue_held
+    R_cr[4]=revenue[4]*revenue_held
+    R_cr[5]=revenue[5]*revenue_held
+    
+    pC_cr=production_costs
+    
+    covered_costs=(pC_cr[3]+pC_cr[4]+pC_cr[5])-(R_cr[3]+R_cr[4]+R_cr[5])
+    pC_cr[3]=0
+    pC_cr[4]=0
+    pC_cr[5]=0
+    
+    if(covered_costs>0){
+        tot_credit=renovation_costs+covered_costs
+    }else{
+        tot_credit=renovation_costs
+    }
+    
+    tot_interests=tot_credit*interest_rate*nbr_periods
+    credit_and_interests=tot_credit+tot_interests
+    crC=c(0,0,0,0,0,0,0,0,0,0,0,0)
+    crC[start:(start+(nbr_periods-1))]=credit_and_interests/nbr_periods
+    
+    C_cr=pC_cr+crC
+    
+    results_cr=cbind.data.frame(R_cr,pC_cr,crC,C_cr)
+    
+    return(results_cr)
+}
+
+```
+## Price setting mechanisms
+```{r message=FALSE, warning=FALSE}
+price_setting<-function(price_mechanism,c_price,price_premiums){
+if(price_mechanism=="CaFC"){
+  price_set=c_price+price_premiums
+}else if (price_mechanism=="FT"){
+  if(c_price>1.4){
+    price_set=c_price+price_premiums
+  }else{
+    price_set=1.4+price_premiums
+  }
+} else if(price_mechanism=="Conventional"){
+    price_set=c_price+price_premiums
+  }
+      else{
+    print("Choose between price mechanism 'CaFC', 'FT' or 'Conventional'")
+  }
+  
+  return(price_set)
+  
+}
+
+```
+
+
+## Local Credit terms
+```{r message=FALSE, warning=FALSE}
+#Interest rate of crédit
+#interest_rate_local=0.2
+# Start year
+credit_start_local=1
+#Number of years
+credit_periods_local=5
+# Function to adjust Revenue, Production Costs and Credit Costs 
+local_credit<-function(revenue,production_costs,renovation_costs,interest_rate=interest_rate,start=credit_start_local,nbr_periods=credit_periods_local){
+    R_cr=revenue
+    
+    pC_cr=production_costs
+    
+    tot_credit=renovation_costs
+        
+    tot_interests=tot_credit*interest_rate*nbr_periods
+    credit_and_interests=tot_credit+tot_interests
+    crC=c(0,0,0,0,0,0,0,0,0,0,0,0)
+    crC[start:(start+(nbr_periods-1))]=credit_and_interests/nbr_periods
+    
+    C_cr=pC_cr+crC
+    
+    results_cr=cbind.data.frame(R_cr,pC_cr,crC,C_cr)
+    
+    return(results_cr)
+}
+
+```
+# Function to build scenarios
+The following function builds a scenario based on the following information given
+- Variety ("starmaya" or "local_variety")
+- Price ($/lbs)
+- Credit type ("CaFC credit" or "Local credit")
+- Discount rate (%) to be applied when calculating NPV and B/C ratio
+
+The function returns:
+- a dataframe with results from year 1 to 12 for revenue, production costs, credit costs, total costs, net margin, accumulated net margin, Benefits (discounted), Costs (discounted), Net profit (discounted)
+- NPV
+- B/C ratio
+```{r message=FALSE, warning=FALSE}
+build_scenario<-function(variety="starmaya",price_mechanism="CaFC",c_price="1.0",price_premiums=0.9,interest_rate=0.1,credit_type="CaFC credit",discount_rate=10){
+    ## base Revenues anc production costs based on variety
+  price=price_setting(price_mechanism = price_mechanism,c_price = c_price,price_premiums = price_premiums)  
+  if (variety=="starmaya"){
+        R=y_starmaya*(price/0.46)
+        pC=pC_starmaya
+        rC=rC_starmaya
+    } else if(variety=="local"){
+        R=y_local_variety*(price/0.46)
+        pC=pC_local_variety
+        rC=rC_local_variety
+    }else{
+        print("Choose a variety between starmaya or local")
+    }
+    
+    if(credit_type=="CaFC credit"){
+        results=cafc_credit(revenue = R,production_costs = pC,
+                            renovation_costs = rC,interest_rate=interest_rate)
+    }else if(credit_type=="Local credit"){
+        results=local_credit(revenue = R,production_costs = pC,
+                             renovation_costs = rC,interest_rate=interest_rate)
+    }else{
+        print("Choose a credit type between CaFC credit or Local credit")
+    }
+    # Calculating net margin and accumulated net margin
+    results$netmargin=results$R_cr-results$C_cr
+    results$accum_netmargin=cumsum(results$netmargin)
+    
+    # calculate NPV and B/C ratio
+    #Discount rate
+    r=as.numeric(discount_rate/100)
+    #time period
+    n=12
+    
+    results$Benefits=0
+    #Discounted Benefits for B/C ratio
+    for(i in seq(1:n)){
+        results[i,]$Benefits=(results[i,]$R_cr)/((1+r)^i)
+    }
+    
+    results$Costs=0
+    #Discounted Costs for B/C ratio
+    for(i in seq(1:n)){
+        results[i,]$Costs=(results[i,]$C_cr)/((1+r)^i)
+    }
+    
+    # Discounted net margin for NPW
+    results$BC=0
+    #Discounted Costs for B/C ratio
+    for(i in seq(1:n)){
+        results[i,]$BC=(results[i,]$netmargin)/((1+r)^i)
+    }
+    
+    results$accum_BC=cumsum(results$BC)
+    # NPV
+    NPV=sum(results$BC)
+    
+    BC_ratio=(sum(results$Benefits))/(sum(results$Costs))
+    
+    ls_results=c(results,NPV,BC_ratio)
+    
+    return(ls_results)
+}
+
+```
+# Net Present Value and Benefit/Costs ratios
+## Scenario 1
+
+```{r message=FALSE, warning=FALSE}
+## variety
+variety_S1="starmaya"
+## Price
+price_mechanism_S1="CaFC"
+c_price=1.1
+price_premiums_S1=(0.7+0.2)
+##setting interest rate and credit type
+interest_rate_S1=0.1
+credit_type_S1="CaFC credit"
+## setting discount rate for NPV and B/C ratio
+discount_rate_S1=10
+results_S1=build_scenario(variety = variety_S1,price_mechanism = price_mechanism_S1,c_price=c_price,price_premiums = price_premiums_S1,interest_rate=interest_rate_S1,credit_type = credit_type_S1,discount_rate = discount_rate_S1)
+results_S1$accum_BC[12]
+results_S1[[12]]
+
+```
+## Scenario 2
+
+```{r message=FALSE, warning=FALSE}
+## variety
+variety_S2="local"
+## Price
+price_mechanism_S2="FT"
+c_price=1.1
+price_premiums_S2=0.2
+##setting interest rate and credit type
+interest_rate_S2=0.2
+credit_type_S2="Local credit"
+## setting discount rate for NPV and B/C ratio
+discount_rate_S2=10
+results_S2=build_scenario(variety = variety_S2,price_mechanism = price_mechanism_S2,c_price=c_price,price_premiums = price_premiums_S2,interest_rate=interest_rate_S2,credit_type = credit_type_S2,discount_rate = discount_rate_S2)
+results_S2$accum_BC[12]
+results_S2[[12]]
+```
+## Scenario 3
+
+```{r message=FALSE, warning=FALSE}
+## variety
+variety_S3="local"
+## Price
+price_mechanism_S3="Conventional"
+c_price=1.1
+price_premiums_S3=0
+##setting interest rate and credit type
+interest_rate_S3=0.2
+credit_type_S3="Local credit"
+## setting discount rate for NPV and B/C ratio
+discount_rate_S3=10
+results_S3=build_scenario(variety = variety_S3,price_mechanism = price_mechanism_S3,c_price=c_price,price_premiums = price_premiums_S3,interest_rate=interest_rate_S3,credit_type = credit_type_S3,discount_rate = discount_rate_S3)
+results_S3$accum_BC[12]
+results_S3[[12]]
+```
+# Plotting net margin through 12 years
+## Creating dataframe for plotting
+```{r message=FALSE, warning=FALSE}
+years=as.integer(seq(1:12))
+results_S1_plot=as.data.frame(results_S1[1:10])
+results_S1_plot$Scenario="Scenario 1"
+results_S1_plot$years=years
+
+results_S2_plot=as.data.frame(results_S2[1:10])
+results_S2_plot$Scenario="Scenario 2"
+results_S2_plot$years=years
+
+results_S3_plot=as.data.frame(results_S3[1:10])
+results_S3_plot$Scenario="Scenario 3"
+results_S3_plot$years=years
+
+all_results=rbind(results_S1_plot,results_S2_plot,results_S3_plot)
+```
+## Annual Present Value
+```{r message=FALSE, warning=FALSE}
+
+p=  ggplot( data=all_results, aes(x=years,
+                            y=BC, group=Scenario, color=Scenario)) +
+    geom_hline(yintercept = 0, color = "grey80", size = 1)+
+    geom_line(size=1,aes(linetype=Scenario)) +
+    scale_linetype_manual(values=c(1,2,4))+
+    scale_color_viridis(discrete = TRUE) +
+    ggtitle("Annual Present Value per Ha (r = 10%)")+
+    scale_x_continuous(breaks=years,limits=c(1,12))+
+    theme_clean()+
+    theme(legend.title = element_blank(),
+          axis.title.x = element_text(size = 15),
+          axis.text.x = element_text(size = 15),
+          axis.text.y = element_text(size = 15),
+          axis.title.y = element_text(size = 15))+
+    ylab("Present Value (US$/Ha)\n")+
+    xlab("\nYear")
+    
+p
+
+```
+
+## Cumulated Annual Present Value
+```{r message=FALSE, warning=FALSE}
+
+p=  ggplot( data=all_results, aes(x=years,
+                            y=accum_BC, group=Scenario, color=Scenario)) +
+    geom_hline(yintercept = 0, color = "grey80", size = 1)+
+    geom_line(size=1,aes(linetype=Scenario)) +
+    scale_linetype_manual(values=c(1,2,4))+
+    scale_color_viridis(discrete = TRUE) +
+    ggtitle("Cumulated Annual Present Value per Ha (r = 10%)") +
+    ylab("Cum. Present Value (US$/Ha) \n")+
+    xlab("\nYear")+
+    scale_x_continuous(breaks=years,limits=c(1,12))+
+    theme_clean()+
+    theme(legend.title = element_blank(),
+          axis.title.x = element_text(size = 15),
+          axis.text.x = element_text(size = 15),
+          axis.text.y = element_text(size = 15),
+          axis.title.y = element_text(size = 15))
+p
+
+
+```
+# Sensitivity analysis
+## Price sensitivity
+### Functions for price sensitivity analysis
+```{r message=FALSE, warning=FALSE}
+## Scenario 1
+price_sensitivity_S1<-function(x){
+    list=build_scenario(c_price=x,price_mechanism=price_mechanism_S1,price_premiums=price_premiums_S1,variety = variety_S1,interest_rate=interest_rate_S1,credit_type = credit_type_S1,discount_rate = discount_rate_S1)
+    return(list$accum_BC[12])
+}
+price_sensitivity_S1 <- Vectorize(price_sensitivity_S1)
+
+## Scenario 2
+price_sensitivity_S2<-function(x){
+    list=build_scenario(c_price=x,price_mechanism=price_mechanism_S2,price_premiums=price_premiums_S2,variety = variety_S2,interest_rate=interest_rate_S2,credit_type = credit_type_S2,discount_rate = discount_rate_S2)
+    return(list$accum_BC[12])
+}
+price_sensitivity_S2 <- Vectorize(price_sensitivity_S2)
+
+## Scenario 3
+price_sensitivity_S3<-function(x){
+    list=build_scenario(c_price=x,price_mechanism=price_mechanism_S3,price_premiums=price_premiums_S3,variety = variety_S3,interest_rate=interest_rate_S3,credit_type = credit_type_S3,discount_rate = discount_rate_S3)
+    return(list$accum_BC[12])
+}
+price_sensitivity_S3 <- Vectorize(price_sensitivity_S3)
+
+```
+### Ploting results of price sensitivity analysis
+```{r message=FALSE, warning=FALSE}
+#results for c-price=0.9;1.1;1.5
+Price_sensitivity_0.8=c(price_sensitivity_S1(0.9),price_sensitivity_S2(0.9),price_sensitivity_S3(0.9))
+Price_sensitivity_1.1=c(price_sensitivity_S1(1.1),price_sensitivity_S2(1.1),price_sensitivity_S3(1.1))
+Price_sensitivity_1.5=c(price_sensitivity_S1(1.5),price_sensitivity_S2(1.5),price_sensitivity_S3(1.5))
+Price_sensitivity_0.8
+Price_sensitivity_1.1
+Price_sensitivity_1.5
+#setting minimum and maximum c-price for sensitivity analysis
+min_c_price=0.5
+max_c_price=2
+#plot results
+p=ggplot(data.frame(x=c(min_c_price,max_c_price)), aes(x=x)) + 
+    stat_function(fun=price_sensitivity_S1,colour = viridis(3,alpha = 0.8)[1],size=1,linetype=1)+
+    stat_function(fun=price_sensitivity_S2,colour=viridis(3,alpha = 0.8)[2],size=1,linetype=2)+
+    stat_function(fun=price_sensitivity_S3,colour=viridis(3,alpha = 0.8)[3],size=1,linetype=3)
+ p=p+
+   geom_hline(yintercept = 0, color = "grey80", size = 1)+
+    ggtitle("Variation of NPV depending on c-price") +
+    ylab("Net Present Value (US$/Ha)\n")+
+    xlab("\nC-price (US$/lbs)")+
+    scale_x_continuous(breaks=seq(min_c_price,max_c_price,by=0.2),limits=c(min_c_price,max_c_price))+
+    theme_clean()+
+    theme(legend.title = element_blank(),
+          axis.title.x = element_text(size = 15),
+          axis.text.x = element_text(size = 15),
+          axis.text.y = element_text(size = 15),
+          axis.title.y = element_text(size = 15))
+ p
+   
+```
+
+
+## Discount sensitivity
+### Functions for Discount rate sensitivity analysis
+```{r message=FALSE, warning=FALSE}
+## Scenario 1
+discount_rate_sensitivity_S1<-function(x){
+    list=build_scenario(discount_rate=x,c_price=c_price,price_mechanism=price_mechanism_S1,price_premiums=price_premiums_S1,variety = variety_S1,interest_rate=interest_rate_S1,credit_type = credit_type_S1)
+    return(list$accum_BC[12])
+}
+discount_rate_sensitivity_S1 <- Vectorize(discount_rate_sensitivity_S1)
+
+## Scenario 2
+discount_rate_sensitivity_S2<-function(x){
+    list=build_scenario(discount_rate=x,c_price=c_price,price_mechanism=price_mechanism_S2,price_premiums=price_premiums_S2,variety = variety_S2,interest_rate=interest_rate_S2,credit_type = credit_type_S2)
+    return(list$accum_BC[12])
+}
+discount_rate_sensitivity_S2 <- Vectorize(discount_rate_sensitivity_S2)
+
+## Scenario 3
+discount_rate_sensitivity_S3<-function(x){
+    list=build_scenario(discount_rate=x,c_price=c_price,price_mechanism=price_mechanism_S3,price_premiums=price_premiums_S3,variety = variety_S3,interest_rate=interest_rate_S3,credit_type = credit_type_S3)
+    return(list$accum_BC[12])
+}
+discount_rate_sensitivity_S3 <- Vectorize(discount_rate_sensitivity_S3)
+discount_rate_sensitivity_S1(0)
+```
+
+### Ploting results of discount rate sensitivity analysis
+```{r message=FALSE, warning=FALSE}
+#results for discount rate=5%;10%;20%
+Discount_rate_sensitivity_5=c(discount_rate_sensitivity_S1(5),discount_rate_sensitivity_S2(5),discount_rate_sensitivity_S3(5))
+Discount_rate_sensitivity_10=c(discount_rate_sensitivity_S1(10),discount_rate_sensitivity_S2(10),discount_rate_sensitivity_S3(10))
+Discount_rate_sensitivity_20=c(discount_rate_sensitivity_S1(20),discount_rate_sensitivity_S2(20),discount_rate_sensitivity_S3(20))
+Discount_rate_sensitivity_5
+Discount_rate_sensitivity_10
+Discount_rate_sensitivity_20
+#setting minimum and maximum discount rate for sensitivity analysis
+min_discount_rate=0
+max_discount_rate=20
+#plot results
+p=ggplot(data.frame(x=c(min_discount_rate,max_discount_rate)), aes(x=x)) + 
+    stat_function(fun=discount_rate_sensitivity_S1,colour = viridis(3,alpha = 0.8)[1],size=1,linetype=1)+
+    stat_function(fun=discount_rate_sensitivity_S2,colour=viridis(3,alpha = 0.8)[2],size=1,linetype=2)+
+    stat_function(fun=discount_rate_sensitivity_S3,colour=viridis(3,alpha = 0.8)[3],size=1,linetype=3)
+
+  p=p+
+    geom_hline(yintercept = 0, color = "grey80", size = 1)+
+    ggtitle("Variation of NPV depending on applied discount rate") +
+    ylab("Net Present Value (US$/Ha)\n")+
+    xlab("\n% Discount Rate (r)")+
+    scale_x_continuous(breaks=seq(min_discount_rate,max_discount_rate,by=2),limits=c(min_discount_rate,max_discount_rate))+
+    theme_clean()+
+    theme(legend.title = element_blank(),
+          axis.title.x = element_text(size = 15),
+          axis.text.x = element_text(size = 15),
+          axis.text.y = element_text(size = 15),
+          axis.title.y = element_text(size = 15))
+ 
+p
+
+```
+
+
+
+
+## Interest rate sensitivity
+### Functions for interest rate sensitivity analysis
+```{r message=FALSE, warning=FALSE}
+## Scenario 1
+interest_sensitivity_S1<-function(x){
+    list=build_scenario(interest_rate=x,c_price=c_price,price_mechanism=price_mechanism_S1,price_premiums=price_premiums_S1,variety = variety_S1,credit_type = credit_type_S1,discount_rate = discount_rate_S1)
+    return(list$accum_BC[12])
+}
+interest_sensitivity_S1 <- Vectorize(interest_sensitivity_S1)
+
+## Scenario 2
+interest_sensitivity_S2<-function(x){
+    list=build_scenario(interest_rate=x,c_price=c_price,price_mechanism=price_mechanism_S2,price_premiums=price_premiums_S2,variety = variety_S2,credit_type = credit_type_S2,discount_rate = discount_rate_S2)
+    return(list$accum_BC[12])
+}
+interest_sensitivity_S2 <- Vectorize(interest_sensitivity_S2)
+
+## Scenario 3
+interest_sensitivity_S3<-function(x){
+    list=build_scenario(interest_rate=x,c_price=c_price,price_mechanism=price_mechanism_S3,price_premiums=price_premiums_S3,variety = variety_S3,credit_type = credit_type_S3,discount_rate = discount_rate_S3)
+    return(list$accum_BC[12])
+}
+interest_sensitivity_S3 <- Vectorize(interest_sensitivity_S3)
+
+```
+### Ploting results of interest rate sensitivity analysis
+```{r message=FALSE, warning=FALSE}
+#results for interest rate=10%,20%,30%
+interest_sensitivity_10=c(interest_sensitivity_S1(0.1),interest_sensitivity_S2(0.1),interest_sensitivity_S3(0.1))
+interest_sensitivity_20=c(interest_sensitivity_S1(0.2),interest_sensitivity_S2(0.2),interest_sensitivity_S3(0.2))
+interest_sensitivity_30=c(interest_sensitivity_S1(0.3),interest_sensitivity_S2(0.3),interest_sensitivity_S3(0.3))
+interest_sensitivity_10
+interest_sensitivity_20
+interest_sensitivity_30
+#setting minimum and maximum interest rate for sensitivity analysis
+min_interest_rate=0.05
+max_interest_rate=0.3
+#plot results
+p=ggplot(data.frame(x=c(min_interest_rate,max_interest_rate)), aes(x=x)) + 
+    stat_function(fun=interest_sensitivity_S1,colour = viridis(3,alpha = 0.8)[1],size=1,linetype=1)+
+    stat_function(fun=interest_sensitivity_S2,colour=viridis(3,alpha = 0.8)[2],size=1,linetype=2)+
+    stat_function(fun=interest_sensitivity_S3,colour=viridis(3,alpha = 0.8)[3],size=1,linetype=3)
+ p=p+
+   geom_hline(yintercept = 0, color = "grey80", size = 1)+
+    ggtitle("Variation of NPV depending on interest rate of loan") +
+    ylab("Net Present Value (US$/Ha)\n")+
+    xlab("\nInterest rate of loan")+
+    scale_x_continuous(breaks=seq(min_interest_rate,max_interest_rate,by=0.05),limits=c(min_interest_rate,max_interest_rate))+
+    theme_clean()+
+    theme(legend.title = element_blank(),
+          axis.title.x = element_text(size = 15),
+          axis.text.x = element_text(size = 15),
+          axis.text.y = element_text(size = 15),
+          axis.title.y = element_text(size = 15))
+ p
+ 
+```
+### Ploting Costs and revenues for different 
+```{r message=FALSE, warning=FALSE}
+
+   
+```
